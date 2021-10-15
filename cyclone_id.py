@@ -5,6 +5,7 @@ from netCDF4 import Dataset
 from matplotlib.backends.backend_pdf import PdfPages
 import matplotlib.pyplot as plt
 import matplotlib
+matplotlib.use('Agg')
 from skimage import measure
 import argparse
 
@@ -19,6 +20,7 @@ parser.add_argument('filename', help='data input filename')
 parser.add_argument('--topofile', help='topography filename')
 parser.add_argument('-p','--plotname', help='plot name and path')
 parser.add_argument('-pd','--plotdetail', help='flag: plot each step', action="store_true")
+parser.add_argument('-no_p_red','--no_pres_red', help='flag: pressure reduction to sea level', action="store_true")
 parser.add_argument('-t0','--timestep', help='timestep', type=int, default=0)
 parser.add_argument('-k0','--modelevel', help='model level', type=int)
 parser.add_argument('-minlat','--minlat', help='1th lat for subdomain', type=float)
@@ -39,13 +41,18 @@ else:
     topofilename = filename
 
 
+if cl_args.no_pres_red: 
+    p_redu = False
+else:
+    p_redu = True
 
 pname = 'P'            # Name of surface pressure field in file
 toponame = 'TOPOGRAPHY' # Name of topography field in file
 latname = 'lat'         # Name of latitude field in file
 lonname = 'lon'         # Name of longitude field in file 
+tname = 'T'             # Name of tempeprature field in file
 
-dp = .5                             # Pressure interval in hPa
+dp = 1.                             # Pressure interval in hPa
 min_p = 940.                        # Minimum pressure contour in hPa
 max_p = 1035.                       # Maximum pressure contour in hPa
 min_clength = 200.                  # Minimal contour length in km
@@ -56,6 +63,9 @@ min_p_filter = 940.                 # Min filter for extrema in hPa
 max_p_filter = 1050.                # Max filter for extrema in hPa
 topo_filter  = 1500.                # Topopgrahy filter in m
 
+
+import time as cpu_time
+start_time = cpu_time.time()
 
 
 # Time level. Default is 0 
@@ -148,6 +158,22 @@ def min_max_arr( arr):
 
     print( name + " Max: " + str( np.amax(arr) )  + " Min: " + str( np.amin(arr) ) + " Mean: "+str( np.mean(arr) ) +" NaN? " + str(nan.any()) + " Inf? " + str(inf.any()) + " Dtype: " + str(arr.dtype) )
 
+
+# Pressure reduction to sea-level using barometeric formula
+g = 9.80665 # Gravitational acceleration in m s^-2
+Ra = 287.04781 # Specific gas constant of dry air in J kg^-1 K^-1
+def baro_pres( z, P, T, z0=0 ):
+    # Variant with mean temperature
+    # Tn = T + 0.00325 * z
+    # Variant with constant temperature 
+    # h  = z - z0
+    # P0 = P * np.exp(  g * h / ( Ra * Tn ) )
+    # Variant with linear temperature profile
+    lapse = -0.0065
+    exp = g / ( Ra * lapse )
+    P0 = P * ( T / ( T + lapse * ( z0 - z ) ) )**exp
+
+    return P0
 
 # Plot routine for contours and extrema
 def plot_contour( pp, x, y, z, title, lev=None, list_contours=[], points=None, \
@@ -405,18 +431,19 @@ def find_contours( arr, level, x, y, lat, lon, x_sinu, y_sinu ):
         for i, ele in enumerate(contours):
             obj = contour()
             obj.contour = ele # Contour coordinate array
-            obj.value = val   # Contour value
+            obj.value   = val   # Contour value
             # Contour in latlon
-            obj.latlon = interpolate_coordinates( obj.contour, x, y, lat, lon )
+            obj.latlon  = interpolate_coordinates( obj.contour, x, y, lat, lon )
             # Contour in sinusodial projection 
             obj.xy_sinu = sinusodial_contours( obj.latlon )
-            obj.length = contour_length( obj.latlon ) # Contour length in km
+            obj.length  = contour_length( obj.latlon ) # Contour length in km
+            obj.cyclone_extrema = []
             list_contours.append( obj )
 
     return list_contours
 
 
-# Find points inside clodes contour
+# Check if extrema is inside closed contour
 def find_points_inside_contour( list_contours, list_points ):
 
     N = len(list_contours)
@@ -447,6 +474,33 @@ def find_points_inside_contour( list_contours, list_points ):
                 if inside:
                     obj.extrema.append( point )
                     point.enclosing_contours.append( obj )
+
+# Find all points inside contour
+def find_all_points_inside_contours( list_contours, x, y, value_array ):
+
+    #N = len(list_contours)
+    shape = np.shape( x )
+
+    for i in np.ndindex(shape):
+            
+        for j, contour in enumerate( list_contours ):
+            
+            if value_array[i] == 0:
+
+                x_max = np.amax( contour.contour[:][0] )
+                y_max = np.amax( contour.contour[:][1] )
+                x_min = np.amin( contour.contour[:][0] )
+                y_min = np.amin( contour.contour[:][1] )
+
+                # Exclude points that are outside the contour by being  
+                if x[i] >= x_min and x[i] <= x_max and y[i] >= y_min and y[i] <= y_max:
+                    # Verify that point reall is inside contour
+                    inside = ray_tracing_method( x[i], y[i], contour.contour) 
+                    if inside:
+                        value_array[i] = 1
+                       
+
+    return value_array
                     
 
 # Characterize minima and their neighbours
@@ -463,8 +517,9 @@ def cluster_extrema( list_extrema, cluster_radius ):
         pos = extrema.latlon
         value = extrema.value
         contours = extrema.enclosing_contours
+        extrema.contour_flag = [True] * len( extrema.enclosing_contours )
 
-
+        #print( str(extrema.value) + ' with Contours: ' + str(len(contours)) )
         extrema.list_neighbours = []
         # Check if other extrema are in cluster radius
         for j in range(N):
@@ -475,14 +530,35 @@ def cluster_extrema( list_extrema, cluster_radius ):
                 pos2 = another_extrema.latlon
                 distance = calculate_distance( pos[0], pos[1], pos2[0], pos2[1] ) 
 
-                if distance <= cluster_radius:
-                    # Check if extrema share a contour
-                    contour_set1 = set( contours )
-                    contour_set2 = set( another_extrema.enclosing_contours )
-                    share = contour_set1.intersection( contour_set2 )
-                    if len( share ) > 0:
-                        extrema.list_neighbours.append( another_extrema )
+                # Check if extrema share a contour
+                contour_set1 = set( contours )
+                contour_set2 = set( another_extrema.enclosing_contours )
+                share = contour_set1.intersection( contour_set2 )
 
+                # Neighbours in same cyclone 
+                if len( share ) > 0 and distance <= cluster_radius:
+                    extrema.list_neighbours.append( another_extrema )
+
+                # Neighbours in different cyclones. Remove sharing contours
+                if len( share ) > 0 and distance > cluster_radius:
+                    contour_set1.difference_update( share )
+                    contour_set2.difference_update( share )
+
+                   
+                    for i, contour in enumerate( extrema.enclosing_contours  ):
+                        if contour in share:
+                            extrema.contour_flag[i] = False
+                        
+                    # extrema.enclosing_contours =  MaskableList( [] )
+                    # for i, contour in enumerate( contour_set1 ):
+                    #     extrema.enclosing_contours.append( contour )
+
+                    # another_extrema.enclosing_contours =  MaskableList( [] )
+                    # for i, contour in enumerate( contour_set2 ):
+                    #     another_extrema.enclosing_contours.append( contour )
+                        
+
+   
         # Characterize extrema in regard to its neighbours
         M = len(extrema.list_neighbours)
         if M > 0:
@@ -503,18 +579,35 @@ def cluster_extrema( list_extrema, cluster_radius ):
             extrema.type = 'free minima'
             extrema.color = 'green'
 
+    # Remove shared contours of different cyclones and find largest contour
+    for i in range(N):
+
+        extrema  = list_extrema[i]
+        #contours = extrema.
+        flag     = extrema.contour_flag
+        contours = extrema.enclosing_contours
+        contours = contours[ flag ]
+        if not isinstance(contours, list):   
+            contours = [ contours ]
+            flag = [ flag ]
+        
+
         # Find largest enclosing contour
-        if extrema.type == 'deepest minimum' or extrema.type == 'free minima' \
-                and len(contours) > 0:
+        if len(contours) > 0: # andextrema.type == 'deepest minimum' or extrema.type == 'free minima' \
+            #print( extrema.type + "  " + str(extrema.value) + ' with ' + str(len(contours) ) + ' contours' \
+             #          + ' out of prior ' + str(len(flag)) )
+            #print( contours )
             values = []
             for i, contour in enumerate( contours ):
-                values.append( contour.value)
-            max_value = max( values )
-            max_index = [i for i, j in enumerate(values) if j == max_value]
-         
-            largest_contour = contours[i]
-            extrema.largest_enclosing_contour = largest_contour
-            largest_contour.cyclone_extrema = extrema
+                values.append( contour.value )
+           
+            if len(values) > 1:
+                max_value = max( values )
+                max_index = [i for i, j in enumerate(values) if j == max_value]
+
+                largest_contour = contours[max_index[0]]
+                extrema.largest_enclosing_contour = largest_contour
+                largest_contour.cyclone_extrema.append( extrema )
  
 #--------------------------------------------------------
 #------------- Test and filter functions ----------------
@@ -648,18 +741,49 @@ def test_extrema_depth( list_extrema, min_threshold = min_p_filter, max_threshol
 # Get a list of largest enclosing contours
 def filter_largest_contour( list_extrema ):
 
-    list_contours = MaskableList( [] )
+    #list_extrema_new  = MaskableList( [] )
+    list_contours     = MaskableList( [] )
     for i, point in enumerate( list_extrema ):
         if hasattr(point, 'largest_enclosing_contour'):
             contour = getattr(point, 'largest_enclosing_contour')
             list_contours.append( contour )
+            #list_extrema_new.append( point ) 
 
     return list_contours
+
+# Get a list of extrema with enclosing contours
+def filter_extrema_w_contour( list_contour ):
+
+    new_list_extrema = MaskableList( [] )
+    for i, contour in enumerate( list_contour ):
+        if hasattr(contour, 'cyclone_extrema'):
+            extrema = getattr(contour, 'cyclone_extrema')
+            for j, point in enumerate( extrema ):
+                new_list_extrema.append( point )
+    # Remove duplicates
+    new_list_extrema = list(  dict.fromkeys( new_list_extrema ) )
+    return new_list_extrema
+
+# Filter out all extrema without any enclosing contours
+def filter_extrema_no_contour( list_extrema  ):
+    
+    N = len(list_extrema)
+    mask = [True] * N
+    for i in range(N):
+        extrema = list_extrema[i]
+        M = len( extrema.enclosing_contours)
+        if M == 0:
+            mask[i] = False
+        
+    list_extrema = list_extrema[mask]
+
+    return list_extrema   
 
 #--------------------------------------------------------------------     
         
 
-rootgrp = Dataset(filename, "r", format="NETCDF4")
+# Input file
+rootgrp = Dataset(filename, "a", format="NETCDF4")
 topogrp = Dataset(topofilename, "r", format="NETCDF4")
 
 lati = rootgrp.variables[latname]
@@ -667,6 +791,19 @@ loni = rootgrp.variables[lonname]
 vari = rootgrp.variables[pname]
 topi = topogrp.variables[toponame]
 
+time = rootgrp.variables['time']
+time = time[t0]
+
+# Output file
+# outgrp = Dataset(outfilename, "w", format="NETCDF4")
+# outgrp.setncatts( rootgrp.__dict__ )
+# for name, dimension in rootgrp.dimensions.items():
+#     outgrp.createDimension( name, (len(dimension) if not dimension.isunlimited() else None ))
+
+outgrp = rootgrp
+    
+
+# Subdomain 
 if subdomain:
     i0 = find_nearest_ind(lati,minlat)
     iend = find_nearest_ind(lati,maxlat)
@@ -687,7 +824,28 @@ else:
 
 nlat = iend - i0
 nlon = jend - j0
+nz   = rootgrp.dimensions['height'].size
 
+# Output variable
+#cyclone_index = np.zeros( ( rootgrp.dimensions['time'].size, \
+#                            rootgrp.dimensions['lat'].size,  \
+#                            rootgrp.dimensions['lon'].size ), dtype=int )
+
+# Read cyclone index variable if in file, otherwise create it
+if 'CYCL' in  outgrp.variables:
+    cyclone_index = outgrp['CYCL']
+else:
+    cyclone_index = outgrp.createVariable( 'CYCL', float, ("time", "height", "lat", "lon",) )
+cyclone_index.long_name = "cyclone index"
+cyclone_index.standard_name = "cycl"
+cyclone_index.units = ""
+
+
+for k in range(nz):
+    cyclone_index[t0,k,:,:] = 0
+
+# future time loop begins here
+    
 # Only surface pressure is a 3D field, every other is 4D [time,level,lat,lon]
 if pname == 'P':
     var = CopyArrayDict( vari[t0,k0,i0:iend,j0:jend], vari.__dict__ )
@@ -701,6 +859,12 @@ else:
     var.units = 'hPa'
 
 top = CopyArrayDict( topi[i0:iend,j0:jend],   topi.__dict__ )
+
+# Pressure reduction to sea-level
+if p_redu:
+    tempi = rootgrp.variables[tname]
+    temp = tempi[t0,k0,i0:iend,j0:jend]
+    var = baro_pres( top, var, temp )
 
 lat, lon = np.meshgrid(  lati[i0:iend], loni[j0:jend],  indexing='ij' )
 lat = CopyArrayDict( lat                  ,   lati.__dict__ ) 
@@ -734,6 +898,9 @@ x_sinu.units = 'km'
 y_sinu = CopyArrayDict( y_sinu,           lon.__dict__ )
 y_sinu.units = 'km'
 
+
+
+                       
 # Pressure intervals
 plevel = np.arange(min_p,max_p,dp) 
 
@@ -778,10 +945,16 @@ list_pcontours = test_contour_length( list_pcontours, min_clength, max_clength)
 if plot_all:
     plot_contour(pp,x,y,var,"Contour too long or short?", lev=plevel, list_contours=list_pcontours,points=list_extrema)
 
+# Test if area enclosed by area is too small
+list_pcontours = test_contour_area( list_pcontours, x, y, x_sinu, y_sinu, min_carea )
+
+if plot_all:
+    plot_contour(pp,x,y,var,"Contour area too small?", lev=plevel,list_contours=list_pcontours,points=list_extrema)
+
 
 # Associate minima with enclosing contours
 find_points_inside_contour( list_pcontours, list_extrema )
-
+list_extrema = filter_extrema_no_contour( list_extrema )
 
 # Test if contour encloses at least one minima
 list_pcontours = test_point_inside( list_pcontours, list_extrema )
@@ -789,22 +962,42 @@ list_pcontours = test_point_inside( list_pcontours, list_extrema )
 if plot_all:
     plot_contour(pp,x,y,var,"Contour encloses minima?", lev=plevel,list_contours=list_pcontours,points=list_extrema)
 
-
 # Characterize minima and associate them with largest enclosing contour
 cluster_extrema( list_extrema, cluster_radius ) 
 
 list_pcontours = filter_largest_contour( list_extrema )
-if plot_all:
-    plot_contour(pp,x,y,var,"Surface pressure minima after clustering", lev=plevel,list_contours=list_pcontours,points=list_extrema)
-
-
-# Test if area enclosed by area is too small
-list_pcontours = test_contour_area( list_pcontours, x, y, x_sinu, y_sinu, min_carea )
+list_extrema = filter_extrema_w_contour( list_pcontours  )
 
 if plot:
-    plot_contour(pp,x,y,var,"Surface pressure minima after contour area check", lev=plevel,list_contours=list_pcontours,points=list_extrema)
+    plot_contour(pp,x,y,var,"Cyclone clustering" , lev=plevel,list_contours=list_pcontours,points=list_extrema)
 
-print( 'Number of cyclones found ' + str(len( list_pcontours ))  )
+
+print( 'Number of cyclones found ' + str(len( list_pcontours )) + ' with ' + str(len( list_extrema )) + ' extremas' )
+
+
+# Calculate cyclone index
+shape = np.shape( cyclone_index )
+cvar = np.zeros( (shape[2], shape[3], ), dtype=cyclone_index.dtype )
+
+find_all_points_inside_contours(  list_pcontours, x, y, cvar )
+
+print( "Index max: ", str(cvar.max()), " min: ", str(cvar.min()) )
+
+for k in range(nz):
+    cyclone_index[t0,k,:,:] = cvar
+
+
+    
+# Close writing
+outgrp.close()
+
+
+if plot_all:
+    plot_contour(pp,x,y,cyclone_index[t0,:,:],"Cyclone index", list_contours=list_pcontours,points=list_extrema)
+
 
 if plot:
     pp.close()
+
+print("Finished after:")
+print("--- %s seconds ---" % (cpu_time.time() - start_time))
