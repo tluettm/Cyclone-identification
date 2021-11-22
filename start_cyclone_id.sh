@@ -33,7 +33,7 @@ job_limit () {
    fi
 }
 
-job_max_number=32
+job_max_number=24
 
 expn=$1
 
@@ -57,26 +57,27 @@ if [ ! -d ${plot_dir} ]; then
     mkdir ${plot_dir}
 fi
 
-minlat=45
-maxlat=70
-minlon=-50
-maxlon=30
+# minlat=45
+# maxlat=70
+# minlon=-50
+# maxlon=30
 
 files=(${diri}P*)
+#files=( ${diri}P20161003_0600  ${diri}P20161003_1200 ${diri}P20161003_1800 ${diri}P20161004_0000 ${diri}P20161004_0600 )
 
 i=0
-for filename in "${files[@]:0:1}"; do
+for filename in "${files[@]}"; do
 
 let i=$i+1
 echo $filename
-plotname=${plot_dir}$i.pdf
+plotname=${plot_dir}"cycl_"${i}.pdf
 
 #plotname=test'.pdf'
 #python ${basedir}/cyclone_id.py ${filename} --topofile ${toponame} -p ${plotname} -p_red
 
-plotname='pres.pdf'
+#plotname='pres.pdf'
 
-python ${basedir}/cyclone_id.py ${filename} --topofile ${toponame} -p ${plotname} #& \
+python ${basedir}/cyclone_id.py ${filename} --topofile ${toponame} -p ${plotname} -pd & #& \
     #   -minlat $minlat -maxlat $maxlat -minlon $minlon -maxlon $maxlon 
 
 job_limit $job_max_number

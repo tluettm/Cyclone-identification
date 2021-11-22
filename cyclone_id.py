@@ -20,7 +20,7 @@ parser.add_argument('filename', help='data input filename')
 parser.add_argument('--topofile', help='topography filename')
 parser.add_argument('-p','--plotname', help='plot name and path')
 parser.add_argument('-pd','--plotdetail', help='flag: plot each step', action="store_true")
-parser.add_argument('-no_p_red','--no_pres_red', help='flag: pressure reduction to sea level', action="store_true")
+parser.add_argument('-p_red','--pres_red', help='flag: pressure reduction to sea level', action="store_true")
 parser.add_argument('-t0','--timestep', help='timestep', type=int, default=0)
 parser.add_argument('-k0','--modelevel', help='model level', type=int)
 parser.add_argument('-minlat','--minlat', help='1th lat for subdomain', type=float)
@@ -41,23 +41,25 @@ else:
     topofilename = filename
 
 
-if cl_args.no_pres_red: 
-    p_redu = False
-else:
+if cl_args.pres_red: 
     p_redu = True
+    print( "Pressure reduction true" )
+else:
+    p_redu = False
+    print( "Pressure reduction false" )
 
-pname = 'P'            # Name of surface pressure field in file
+pname = 'PS'            # Name of surface pressure field in file
 toponame = 'TOPOGRAPHY' # Name of topography field in file
 latname = 'lat'         # Name of latitude field in file
 lonname = 'lon'         # Name of longitude field in file 
 tname = 'T'             # Name of tempeprature field in file
 
-dp = 1.                             # Pressure interval in hPa
+dp = 2.                             # Pressure interval in hPa
 min_p = 940.                        # Minimum pressure contour in hPa
 max_p = 1035.                       # Maximum pressure contour in hPa
 min_clength = 200.                  # Minimal contour length in km
-max_clength = 7500.                 # Maximal contour length in km
-cluster_radius = 1000.              # Radius for clustering extrema in km
+max_clength = 10000.                 # Maximal contour length in km
+cluster_radius = 2000.              # Radius for clustering extrema in km
 min_carea = 100. * 1000.            # Minimum contour area in qkm
 min_p_filter = 940.                 # Min filter for extrema in hPa
 max_p_filter = 1050.                # Max filter for extrema in hPa
@@ -151,7 +153,7 @@ def min_max_arr( arr):
     else:
         name = ""
 
-    if hasattr( arr, 'standard_name' ):
+    if hasattr( arr, 'standard_name'):
         name = arr.standard_name
     else:
         name = ""
@@ -407,7 +409,7 @@ def find_extrema( arr, x, y, x_sinu, y_sinu, order = 1 ):
             # Adjust value of element so that it passes the check 
             # since we are only interested in its neighbours
             block[(order, order)] = block[(order, order)] + 0.1
-            check = val < block
+            check = val <= block
             if check.all():
                 ext = minima()
                 ext.type = 'local minima'                     # Type of extrema
@@ -469,11 +471,23 @@ def find_points_inside_contour( list_contours, list_points ):
 
             # Make sure contour value is larger/smaller than extrema
             if value > extrema:
-                inside = ray_tracing_method( cord[0], cord[1], contour) 
-                # If inside attribute extrema to contour and vice versa
-                if inside:
-                    obj.extrema.append( point )
-                    point.enclosing_contours.append( obj )
+
+                x_max = np.amax( contour[:][0] )
+                y_max = np.amax( contour[:][1] )
+                x_min = np.amin( contour[:][0] )
+                y_min = np.amin( contour[:][1] )
+
+                xp = cord[0]
+                yp = cord[1]
+
+                # Exclude points that are definetly outside the contour by max/min coordinates 
+                if xp >= x_min and xp <= x_max and yp >= y_min and yp <= y_max:
+                
+                    inside = ray_tracing_method( cord[0], cord[1], contour) 
+                    # If inside attribute extrema to contour and vice versa
+                    if inside:
+                        obj.extrema.append( point )
+                        point.enclosing_contours.append( obj )
 
 # Find all points inside contour
 def find_all_points_inside_contours( list_contours, x, y, value_array ):
@@ -492,9 +506,9 @@ def find_all_points_inside_contours( list_contours, x, y, value_array ):
                 x_min = np.amin( contour.contour[:][0] )
                 y_min = np.amin( contour.contour[:][1] )
 
-                # Exclude points that are outside the contour by being  
+                # Exclude points that are definetly outside the contour by max/min coordinates 
                 if x[i] >= x_min and x[i] <= x_max and y[i] >= y_min and y[i] <= y_max:
-                    # Verify that point reall is inside contour
+                    # Verify that point really is inside contour
                     inside = ray_tracing_method( x[i], y[i], contour.contour) 
                     if inside:
                         value_array[i] = 1
@@ -827,9 +841,9 @@ nlon = jend - j0
 nz   = rootgrp.dimensions['height'].size
 
 # Output variable
-#cyclone_index = np.zeros( ( rootgrp.dimensions['time'].size, \
-#                            rootgrp.dimensions['lat'].size,  \
-#                            rootgrp.dimensions['lon'].size ), dtype=int )
+cyclone_index = np.zeros( ( rootgrp.dimensions['time'].size, \
+                           rootgrp.dimensions['lat'].size,  \
+                           rootgrp.dimensions['lon'].size ), dtype=int )
 
 # Read cyclone index variable if in file, otherwise create it
 if 'CYCL' in  outgrp.variables:
@@ -884,6 +898,14 @@ for i in np.ndindex(lon.shape):
 latr.units = 'radians'
 lonr.units = 'radians'
 
+
+# Order of looking for minima dependet on grid size. Serch within 5°
+dlat = abs(lati[0] - lati[1])
+dlon = abs(loni[0] - loni[1])
+dd = (dlat + dlon) / 2.
+order_ext = int(5. / dd)
+
+
 # Grid point arrays used for all contour analysis
 x, y = np.meshgrid( np.arange( 0., nlat, 1. ), np.arange( 0., nlon, 1. ),  indexing='ij'   )
 y = CopyArrayDict( y,           lon.__dict__ )
@@ -908,15 +930,14 @@ plevel = np.arange(min_p,max_p,dp)
 list_pcontours = find_contours( var, plevel, x, y, lat, lon, x_sinu, y_sinu)
 
 # Find local minima 
-order = 5
-list_extrema = find_extrema( var, lat, lon, x_sinu, y_sinu, order = order )
+list_extrema = find_extrema( var, lat, lon, x_sinu, y_sinu, order = order_ext )
 
 
 if plot:
     pp = PdfPages( plot_name )
 
 if plot_all:
-    plot_contour(pp,x,y,var,"Surface pressure minima order "+str(order),lev=plevel,points=list_extrema)
+    plot_contour(pp,x,y,var,"Surface pressure minima order "+str(order_ext),lev=plevel,points=list_extrema)
 
 # Test if extrema are to high in topography 
 list_extrema = test_topography(list_extrema, top)
@@ -969,7 +990,7 @@ list_pcontours = filter_largest_contour( list_extrema )
 list_extrema = filter_extrema_w_contour( list_pcontours  )
 
 if plot:
-    plot_contour(pp,x,y,var,"Cyclone clustering" , lev=plevel,list_contours=list_pcontours,points=list_extrema)
+    plot_contour(pp,x,y,var,"Cyclone clustering at " + str(time) , lev=plevel,list_contours=list_pcontours,points=list_extrema)
 
 
 print( 'Number of cyclones found ' + str(len( list_pcontours )) + ' with ' + str(len( list_extrema )) + ' extremas' )
@@ -992,8 +1013,8 @@ for k in range(nz):
 outgrp.close()
 
 
-if plot_all:
-    plot_contour(pp,x,y,cyclone_index[t0,:,:],"Cyclone index", list_contours=list_pcontours,points=list_extrema)
+# if plot_all:
+#     plot_contour(pp,x,y,cvar,"Cyclone index", list_contours=list_pcontours,points=list_extrema)
 
 
 if plot:
