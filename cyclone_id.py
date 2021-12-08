@@ -179,7 +179,7 @@ def baro_pres( z, P, T, z0=0 ):
 
 # Plot routine for contours and extrema
 def plot_contour( pp, x, y, z, title, lev=None, list_contours=[], points=None, \
-                      format='%d', contourtyp='cord'):
+                      fill=False, format='%d', contourtyp='cord'):
     def get_label(var):
 
         name = getattr(var, 'name', str(var))
@@ -201,7 +201,10 @@ def plot_contour( pp, x, y, z, title, lev=None, list_contours=[], points=None, \
     z_meta = get_label( z )
 
     fig, ax = plt.subplots()
-    cm = ax.contour( y, x, z, colors='black', levels=lev, linewidths=.5 )
+    if fill:
+        cm = ax.contourf( y, x, z, levels=lev)
+    else:
+        cm = ax.contour( y, x, z, colors='black', levels=lev, linewidths=.5 )
     #q = ax.quiver(y, x, u, v, units='width')
 
     ax.set_xlabel( x_meta[1] + " " + x_meta[2] )
@@ -562,8 +565,7 @@ def find_all_points_inside_contours_slicing( list_contours, value_array ):
              i1 = plist[k][0]
              i2 = plist[k][1]
              j  = plist[k][2]
-             #print( i1, i2, j )
-             value_array[i1:i2, j] = 1
+             value_array[min(i1,i2):max(i1,i2), j] = 1
 
     return value_array
 
@@ -583,7 +585,6 @@ def cluster_extrema( list_extrema, cluster_radius ):
         contours = extrema.enclosing_contours
         extrema.contour_flag = [True] * len( extrema.enclosing_contours )
 
-        #print( str(extrema.value) + ' with Contours: ' + str(len(contours)) )
         extrema.list_neighbours = []
         # Check if other extrema are in cluster radius
         for j in range(N):
@@ -660,7 +661,7 @@ def cluster_extrema( list_extrema, cluster_radius ):
         if len(contours) > 0: # andextrema.type == 'deepest minimum' or extrema.type == 'free minima' \
             #print( extrema.type + "  " + str(extrema.value) + ' with ' + str(len(contours) ) + ' contours' \
              #          + ' out of prior ' + str(len(flag)) )
-            #print( contours )
+          
             values = []
             for i, contour in enumerate( contours ):
                 values.append( contour.value )
@@ -875,9 +876,9 @@ if subdomain:
     jend = find_nearest_ind(loni,maxlon)
 else:
     i0 = 0
-    iend = rootgrp.dimensions['lat'].size - 1
+    iend = rootgrp.dimensions['lat'].size #- 1
     j0 = 0
-    jend = rootgrp.dimensions['lon'].size - 1
+    jend = rootgrp.dimensions['lon'].size #- 1
 
 # Model level
 # Remember for ICON level 0 is TOA, last is surface
@@ -1054,8 +1055,6 @@ cvar = np.zeros( (shape[2], shape[3], ), dtype=cyclone_index.dtype )
 # Find collinear points in the contours
 find_all_collinear_pairs( list_pcontours, x, y )
 
-#print( list_pcontours[0].collinear_pairs )
-
 find_all_points_inside_contours_slicing( list_pcontours, cvar)
 
 # find_all_points_inside_contours(  list_pcontours, x, y, cvar )
@@ -1071,9 +1070,8 @@ for k in range(nz):
 outgrp.close()
 
 
-# if plot_all:
-print( np.shape( cvar), np.shape(x), np.shape(y), np.shape(lati), np.shape(loni)  )
-plot_contour(pp,x,y,cvar,"Cyclone index", list_contours=list_pcontours,points=list_extrema)
+if plot_all:
+    plot_contour(pp,x,y,cvar,"Cyclone index", list_contours=list_pcontours,points=list_extrema, fill=True)
 
 
 if plot:
