@@ -286,7 +286,6 @@ def collinear_pairs( contour, x, y  ):
     points = obj.contour
     N = len( points )
 
-    #obj.collinear_pairs = [ ]
     plist = [ ] #obj.collinear_pairs
 
     comb = combinations(points, 2)
@@ -546,6 +545,27 @@ def find_all_collinear_pairs( list_contours, x, y ):
 
         obj = list_contours[i]
         collinear_pairs( obj, x, y )
+
+# Find all points inside contour by slicing between collinear pairs
+def find_all_points_inside_contours_slicing( list_contours, value_array ):
+    
+    N = len(list_contours)
+    
+    for i in range(N):
+
+         obj = list_contours[i]
+         plist = obj.collinear_pairs
+         M = len(plist)
+
+         for k in range(M):
+
+             i1 = plist[k][0]
+             i2 = plist[k][1]
+             j  = plist[k][2]
+             #print( i1, i2, j )
+             value_array[i1:i2, j] = 1
+
+    return value_array
 
 # Characterize minima and their neighbours
 # Cluster and chraracterize minima depending on distance, depth 
@@ -1031,18 +1051,19 @@ shape = np.shape( cyclone_index )
 cvar = np.zeros( (shape[2], shape[3], ), dtype=cyclone_index.dtype )
 
 
-
+# Find collinear points in the contours
 find_all_collinear_pairs( list_pcontours, x, y )
-#collinear_pairs( x, y, list_pcontours[0] )
-print( list_pcontours[0].collinear_pairs ) 
-quit
+
+#print( list_pcontours[0].collinear_pairs )
+
+find_all_points_inside_contours_slicing( list_pcontours, cvar)
 
 # find_all_points_inside_contours(  list_pcontours, x, y, cvar )
 
-# print( "Index max: ", str(cvar.max()), " min: ", str(cvar.min()) )
+print( "Index max: ", str(cvar.max()), " min: ", str(cvar.min()) )
 
-# for k in range(nz):
-#     cyclone_index[t0,k,:,:] = cvar
+for k in range(nz):
+    cyclone_index[t0,k,:,:] = cvar
 
 
     
@@ -1051,7 +1072,8 @@ outgrp.close()
 
 
 # if plot_all:
-#     plot_contour(pp,x,y,cvar,"Cyclone index", list_contours=list_pcontours,points=list_extrema)
+print( np.shape( cvar), np.shape(x), np.shape(y), np.shape(lati), np.shape(loni)  )
+plot_contour(pp,x,y,cvar,"Cyclone index", list_contours=list_pcontours,points=list_extrema)
 
 
 if plot:
