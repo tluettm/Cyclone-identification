@@ -111,7 +111,7 @@ class contour(object):
     pass
 
 # Define maskable list object for sorting contour line arrays and points
-from itertools import compress
+from itertools import compress, combinations
 class MaskableList(list):
 
     def __getitem__(self, index):
@@ -279,6 +279,28 @@ def ray_tracing_method( x, y, poly):
 
     return inside
 
+# Find collinear point pairs in contour and mark the nearest grid points
+def collinear_pairs( contour, x, y  ):
+
+    obj = contour
+    points = obj.contour
+    N = len( points )
+
+    #obj.collinear_pairs = [ ]
+    plist = [ ] #obj.collinear_pairs
+
+    comb = combinations(points, 2)
+
+    for p1, p2 in comb:
+
+         if p1[1] == p2[1]:
+             i1 = find_nearest_ind( x[:,0], p1[0] )
+             i2 = find_nearest_ind( x[:,0], p2[0] )
+             j  = find_nearest_ind( y[0,:], p1[1] )
+             plist.append( [ i1, i2, j ] )
+  
+    obj.collinear_pairs = plist #list(dict.fromkeys(plist))
+   
 # Sinusoidal equal-area map projection  
 # Input of lat and lon in radians
 def sinusodial_map( lat, lon ):
@@ -492,7 +514,6 @@ def find_points_inside_contour( list_contours, list_points ):
 # Find all points inside contour
 def find_all_points_inside_contours( list_contours, x, y, value_array ):
 
-    #N = len(list_contours)
     shape = np.shape( x )
 
     for i in np.ndindex(shape):
@@ -515,7 +536,16 @@ def find_all_points_inside_contours( list_contours, x, y, value_array ):
                        
 
     return value_array
-                    
+
+# Find all collinear pairs
+def find_all_collinear_pairs( list_contours, x, y ):
+
+    N = len(list_contours)
+    
+    for i in range(N):
+
+        obj = list_contours[i]
+        collinear_pairs( obj, x, y )
 
 # Characterize minima and their neighbours
 # Cluster and chraracterize minima depending on distance, depth 
@@ -899,7 +929,7 @@ latr.units = 'radians'
 lonr.units = 'radians'
 
 
-# Order of looking for minima dependet on grid size. Serch within 5°
+# Order of looking for minima dependet on grid size. Search within 5°
 dlat = abs(lati[0] - lati[1])
 dlon = abs(loni[0] - loni[1])
 dd = (dlat + dlon) / 2.
@@ -1000,12 +1030,19 @@ print( 'Number of cyclones found ' + str(len( list_pcontours )) + ' with ' + str
 shape = np.shape( cyclone_index )
 cvar = np.zeros( (shape[2], shape[3], ), dtype=cyclone_index.dtype )
 
-find_all_points_inside_contours(  list_pcontours, x, y, cvar )
 
-print( "Index max: ", str(cvar.max()), " min: ", str(cvar.min()) )
 
-for k in range(nz):
-    cyclone_index[t0,k,:,:] = cvar
+find_all_collinear_pairs( list_pcontours, x, y )
+#collinear_pairs( x, y, list_pcontours[0] )
+print( list_pcontours[0].collinear_pairs ) 
+quit
+
+# find_all_points_inside_contours(  list_pcontours, x, y, cvar )
+
+# print( "Index max: ", str(cvar.max()), " min: ", str(cvar.min()) )
+
+# for k in range(nz):
+#     cyclone_index[t0,k,:,:] = cvar
 
 
     
