@@ -21,8 +21,19 @@ parser.add_argument('--topofile', help='topography filename')
 parser.add_argument('-p','--plotname', help='plot name and path')
 parser.add_argument('-pd','--plotdetail', help='flag: plot each step', action="store_true")
 parser.add_argument('-p_red','--pres_red', help='flag: pressure reduction to sea level', action="store_true")
+parser.add_argument('-2D','--two_dim', help='flag: two dimensional cyclone mask', action="store_true")
 parser.add_argument('-t0','--timestep', help='timestep', type=int, default=0)
 parser.add_argument('-k0','--modelevel', help='model level', type=int)
+
+parser.add_argument('-psn','--pname', help='pressure variable name')
+parser.add_argument('-topon','--toponame', help='topography variable name')
+parser.add_argument('-latn','--latname', help='latitude variable name')
+parser.add_argument('-lonn','--lonname', help='longitude variable name')
+parser.add_argument('-zn','--zname', help='height variable name')
+parser.add_argument('-tn','--tname', help='time variable name')
+parser.add_argument('-tempn','--tempname', help='temperature variable name')
+
+
 parser.add_argument('-minlat','--minlat', help='1th lat for subdomain', type=float)
 parser.add_argument('-maxlat','--maxlat', help='2th lat for subdomain', type=float)
 parser.add_argument('-minlon','--minlon', help='1th lon for subdomain', type=float)
@@ -40,7 +51,13 @@ if cl_args.topofile:
 else:
     topofilename = filename
 
-
+if cl_args.two_dim:
+    two_dim = True
+    print( "Two (spatial) dimension cyclone mask" )
+else:
+    two_dim = False
+    print( "Three (spatial) dimension cyclone mask" )
+    
 if cl_args.pres_red: 
     p_redu = True
     print( "Pressure reduction true" )
@@ -48,11 +65,41 @@ else:
     p_redu = False
     print( "Pressure reduction false" )
 
-pname = 'PS'            # Name of surface pressure field in file
-toponame = 'TOPOGRAPHY' # Name of topography field in file
-latname = 'lat'         # Name of latitude field in file
-lonname = 'lon'         # Name of longitude field in file 
-tname = 'T'             # Name of tempeprature field in file
+# Name of surface pressure field in file
+if cl_args.pname:
+    pname = cl_args.pname
+else:    
+    pname = 'PS'
+# Name of topography field in file
+if cl_args.toponame:
+    toponame = cl_args.toponame
+else:    
+    toponame = 'TOPOGRAPHY'
+# Name of latitude dimension in file
+if cl_args.latname:
+    latname = cl_args.latname
+else:    
+    latname = 'lat'
+# Name of longitude dimension in file
+if cl_args.lonname:
+    lonname = cl_args.lonname
+else:    
+    lonname = 'lon'
+# Name of height dimension in file
+if cl_args.zname:
+    heightname = cl_args.zname
+else:
+    heightname = 'height'
+# Name of time   dimension in file
+if cl_args.tname:
+    timename = cl_args.tname
+else:
+    timename = 'time'
+# Name of tempeprature field in file
+if cl_args.tempname:
+    tname =  cl_args.tempname
+else:
+    tname = 'T'           
 
 dp = 2.                             # Pressure interval in hPa
 min_p = 940.                        # Minimum pressure contour in hPa
@@ -854,9 +901,14 @@ topogrp = Dataset(topofilename, "r", format="NETCDF4")
 lati = rootgrp.variables[latname]
 loni = rootgrp.variables[lonname]
 vari = rootgrp.variables[pname]
-topi = topogrp.variables[toponame]
+if toponame in topogrp.variables.keys():
+    topi = topogrp.variables[toponame]
+    topo_check = True
+else:
+    topo_check = False
+    print('Topography check disabled')
 
-time = rootgrp.variables['time']
+time = rootgrp.variables[timename]
 time = time[t0]
 
 # Output file
@@ -876,38 +928,41 @@ if subdomain:
     jend = find_nearest_ind(loni,maxlon)
 else:
     i0 = 0
-    iend = rootgrp.dimensions['lat'].size #- 1
+    iend = rootgrp.dimensions[latname].size #- 1
     j0 = 0
-    jend = rootgrp.dimensions['lon'].size #- 1
+    jend = rootgrp.dimensions[lonname].size #- 1
 
 # Model level
 # Remember for ICON level 0 is TOA, last is surface
-if cl_args.modelevel: 
-    k0 = cl_args.modelevel
-else:
-    k0 = rootgrp.dimensions['height'].size - 1
-
+if not two_dim:
+    if cl_args.modelevel: 
+        k0 = cl_args.modelevel
+    else:
+        k0 = rootgrp.dimensions[heightname].size - 1
+    nz   = rootgrp.dimensions[heightname].size
+    
 nlat = iend - i0
 nlon = jend - j0
-nz   = rootgrp.dimensions['height'].size
+
 
 # Output variable
-cyclone_index = np.zeros( ( rootgrp.dimensions['time'].size, \
-                           rootgrp.dimensions['lat'].size,  \
-                           rootgrp.dimensions['lon'].size ), dtype=int )
-
 # Read cyclone index variable if in file, otherwise create it
 if 'CYCL' in  outgrp.variables:
     cyclone_index = outgrp['CYCL']
 else:
-    cyclone_index = outgrp.createVariable( 'CYCL', float, ("time", "height", "lat", "lon",) )
+    if not two_dim:
+        cyclone_index = outgrp.createVariable( 'CYCL', float, (timename, heightname, latname, lonname,) )
+    else:
+        cyclone_index = outgrp.createVariable( 'CYCL', float, (timename, latname, lonname,) )
 cyclone_index.long_name = "cyclone index"
 cyclone_index.standard_name = "cycl"
 cyclone_index.units = ""
 
-
-for k in range(nz):
-    cyclone_index[t0,k,:,:] = 0
+if not two_dim:
+    for k in range(nz):
+        cyclone_index[t0,k,:,:] = 0
+else:
+    cyclone_index[t0,:,:] = 0
 
 # future time loop begins here
     
@@ -923,7 +978,8 @@ else:
     var = var / 100.
     var.units = 'hPa'
 
-top = CopyArrayDict( topi[i0:iend,j0:jend],   topi.__dict__ )
+if topo_check:
+    top = CopyArrayDict( topi[i0:iend,j0:jend],   topi.__dict__ )
 
 # Pressure reduction to sea-level
 if p_redu:
@@ -990,11 +1046,12 @@ if plot:
 if plot_all:
     plot_contour(pp,x,y,var,"Surface pressure minima order "+str(order_ext),lev=plevel,points=list_extrema)
 
-# Test if extrema are to high in topography 
-list_extrema = test_topography(list_extrema, top)
+# Test if extrema are to high in topography
+if topo_check:
+    list_extrema = test_topography(list_extrema, top)
 
-if plot_all:
-    plot_contour(pp,x,y,var,"Surface pressure minima after topography filter",lev=plevel,points=list_extrema)
+    if plot_all:
+        plot_contour(pp,x,y,var,"Surface pressure minima after topography filter",lev=plevel,points=list_extrema)
 
 
 # Test if extrema are to extreme
@@ -1049,8 +1106,10 @@ print( 'Number of cyclones found ' + str(len( list_pcontours )) + ' with ' + str
 
 # Calculate cyclone index
 shape = np.shape( cyclone_index )
-cvar = np.zeros( (shape[2], shape[3], ), dtype=cyclone_index.dtype )
-
+if not two_dim:
+    cvar = np.zeros( (shape[2], shape[3], ), dtype=cyclone_index.dtype )
+else:
+    cvar = np.zeros( (shape[1], shape[2], ), dtype=cyclone_index.dtype )
 
 # Find collinear points in the contours
 find_all_collinear_pairs( list_pcontours, x, y )
@@ -1061,9 +1120,11 @@ find_all_points_inside_contours_slicing( list_pcontours, cvar)
 
 print( "Index max: ", str(cvar.max()), " min: ", str(cvar.min()) )
 
-for k in range(nz):
-    cyclone_index[t0,k,:,:] = cvar
-
+if not two_dim:
+    for k in range(nz):
+        cyclone_index[t0,k,:,:] = cvar
+else:
+    cyclone_index[t0,:,:] = cvar
 
     
 # Close writing
