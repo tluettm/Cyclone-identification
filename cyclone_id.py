@@ -249,16 +249,17 @@ def plot_contour( pp, x, y, z, title, lev=None, list_contours=[], points=None, \
 
     fig, ax = plt.subplots()
     if fill:
-        cm = ax.contourf( y, x, z, levels=lev)
+        cm = ax.contourf( y, x, z, levels=lev, )
     else:
         cm = ax.contour( y, x, z, colors='black', levels=lev, linewidths=.5 )
+        ax.clabel(cm, fontsize=8, fmt=format)
     #q = ax.quiver(y, x, u, v, units='width')
 
     ax.set_xlabel( x_meta[1] + " " + x_meta[2] )
     ax.set_ylabel( y_meta[1] + " " + y_meta[2] )
     ax.set_title( title )
    
-    ax.clabel(cm, fontsize=8, fmt=format)
+
 
     for i in range(len(list_contours)):
         contour= list_contours[i]
@@ -540,25 +541,33 @@ def find_points_inside_contour( list_contours, list_points ):
             if not hasattr( point, 'enclosing_contours'):
                 point.enclosing_contours =  MaskableList( [] )
 
-            # Make sure contour value is larger/smaller than extrema
+            # Make sure contour value is larger than minima
             if value > extrema:
 
-                x_max = np.amax( contour[:][0] )
-                y_max = np.amax( contour[:][1] )
-                x_min = np.amin( contour[:][0] )
-                y_min = np.amin( contour[:][1] )
-
-                xp = cord[0]
-                yp = cord[1]
-
-                # Exclude points that are definetly outside the contour by max/min coordinates 
-                if xp >= x_min and xp <= x_max and yp >= y_min and yp <= y_max:
+                # L = len(contour)
                 
-                    inside = ray_tracing_method( cord[0], cord[1], contour) 
-                    # If inside attribute extrema to contour and vice versa
-                    if inside:
-                        obj.extrema.append( point )
-                        point.enclosing_contours.append( obj )
+                # x_max = contour[0][0]
+                # y_max = contour[0][1]
+                # x_min = contour[0][0]
+                # y_min = contour[0][1]
+
+                # for k in range(1,L):
+                #     x_max = max(x_max, contour[k][0])
+                #     x_min = min(x_min, contour[k][0])
+                #     y_max = max(y_max, contour[k][1])
+                #     y_min = min(y_min, contour[k][1])
+                
+                # xp = cord[0]
+                # yp = cord[1]
+        
+                # Exclude points that are definetly outside the contour by max/min coordinates       # Currently disabled since both methods are of similiar performance
+                #if xp >= x_min and xp <= x_max and yp >= y_min and yp <= y_max:
+                
+                inside = ray_tracing_method( cord[0], cord[1], contour) 
+                # If inside attribute extrema to contour and vice versa
+                if inside:
+                    obj.extrema.append( point )
+                    point.enclosing_contours.append( obj )
 
 # Find all points inside contour
 def find_all_points_inside_contours( list_contours, x, y, value_array ):
@@ -1127,12 +1136,12 @@ else:
     cyclone_index[t0,:,:] = cvar
 
     
-# Close writing
+# Close writing 
 outgrp.close()
 
 
 if plot_all:
-    plot_contour(pp,x,y,cvar,"Cyclone index", list_contours=list_pcontours,points=list_extrema, fill=True)
+    plot_contour(pp,x,y,cvar,"Cyclone index", lev=[0.5,1.5], list_contours=list_pcontours,points=list_extrema, fill=True)
 
 
 if plot:
