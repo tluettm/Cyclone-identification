@@ -330,26 +330,44 @@ def ray_tracing_method( x, y, poly):
 
     return inside
 
+
 # Find collinear point pairs in contour and mark the nearest grid points
+from collections import Counter
 def collinear_pairs( contour, x, y  ):
 
     obj = contour
     points = obj.contour
     N = len( points )
 
-    plist = [ ] #obj.collinear_pairs
+    xlist = { }
+    ylist = { }
 
     comb = combinations(points, 2)
 
     for p1, p2 in comb:
 
-         if p1[1] == p2[1]:
-             i1 = find_nearest_ind( x[:,0], p1[0] )
-             i2 = find_nearest_ind( x[:,0], p2[0] )
-             j  = find_nearest_ind( y[0,:], p1[1] )
-             plist.append( [ i1, i2, j ] )
-  
-    obj.collinear_pairs = plist #list(dict.fromkeys(plist))
+        if p1[1] == p2[1]:
+            i1 = find_nearest_ind( x[:,0], p1[0] )
+            i2 = find_nearest_ind( x[:,0], p2[0] )
+            j  = find_nearest_ind( y[0,:], p1[1] )
+            i = ( min(i1,i2),max(i1,i2) )
+            if j not in xlist:
+                xlist[j] = [ i ]
+            else:
+                xlist[j].append( i )
+
+        if p1[0] == p2[0]:
+            i = find_nearest_ind( x[:,0], p1[0] )
+            j1  = find_nearest_ind( y[0,:], p1[1] )
+            j2  = find_nearest_ind( y[0,:], p2[1] )
+            j = ( min(j1,j2),max(j1,j2) )
+            if i not in ylist:
+                ylist[i] = [ j ]
+            else:
+                ylist[i].append( j ) 
+
+    obj.collinear_xpairs = xlist
+    obj.collinear_ypairs = ylist
    
 # Sinusoidal equal-area map projection  
 # Input of lat and lon in radians
@@ -606,24 +624,33 @@ def find_all_collinear_pairs( list_contours, x, y ):
         collinear_pairs( obj, x, y )
 
 # Find all points inside contour by slicing between collinear pairs
-def find_all_points_inside_contours_slicing( list_contours, value_array ):
+def find_all_points_inside_contours_slicing( list_contours, arr ):
     
     N = len(list_contours)
+
+    arr_x = np.zeros( arr.shape )
+    arr_y = np.zeros( arr.shape )
     
     for i in range(N):
 
          obj = list_contours[i]
-         plist = obj.collinear_pairs
-         M = len(plist)
+   
+         plist =  obj.collinear_xpairs
+         for key, p in plist.items():
+             for i in range(len(p)):
+                 i1 = p[i][0]
+                 i2 = p[i][1]
+                 arr_x[ i1:i2, key ] =  1
+         plist =  obj.collinear_ypairs
+         for key, p in plist.items():
+             for i in range(len(p)):
+                 i1 = p[i][0]
+                 i2 = p[i][1]
+                 arr_y[ key, i1:i2 ] =  1
+    arr = arr_x
 
-         for k in range(M):
-
-             i1 = plist[k][0]
-             i2 = plist[k][1]
-             j  = plist[k][2]
-             value_array[min(i1,i2):max(i1,i2), j] = 1
-
-    return value_array
+    arr = np.where( arr_y == 1, arr, 0 ) 
+    return arr
 
 # Characterize minima and their neighbours
 # Cluster and chraracterize minima depending on distance, depth 
@@ -1123,7 +1150,7 @@ else:
 # Find collinear points in the contours
 find_all_collinear_pairs( list_pcontours, x, y )
 
-find_all_points_inside_contours_slicing( list_pcontours, cvar)
+cvar = find_all_points_inside_contours_slicing( list_pcontours, cvar)
 
 # find_all_points_inside_contours(  list_pcontours, x, y, cvar )
 
