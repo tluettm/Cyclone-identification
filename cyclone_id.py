@@ -465,6 +465,27 @@ def contour_area( contour ):
     area = np.abs( area )
 
     return area # in qkm
+
+# Put a box around a contour and return true if point is inside
+def contour_boxing( contour, xp, yp ):
+
+    L = len(contour)
+                
+    x_max = contour[0][0]
+    y_max = contour[0][1]
+    x_min = contour[0][0]
+    y_min = contour[0][1]
+    
+    for k in range(1,L):
+        x_max = max(x_max, contour[k][0])
+        x_min = min(x_min, contour[k][0])
+        y_max = max(y_max, contour[k][1])
+        y_min = min(y_min, contour[k][1])
+            
+    if xp >= x_min and xp <= x_max and yp >= y_min and yp <= y_max:
+        return True
+    else:
+        return False
     
 
 #--------------------------------------------------------
@@ -562,24 +583,8 @@ def find_points_inside_contour( list_contours, list_points ):
             # Make sure contour value is larger than minima
             if value > extrema:
 
-                # L = len(contour)
-                
-                # x_max = contour[0][0]
-                # y_max = contour[0][1]
-                # x_min = contour[0][0]
-                # y_min = contour[0][1]
-
-                # for k in range(1,L):
-                #     x_max = max(x_max, contour[k][0])
-                #     x_min = min(x_min, contour[k][0])
-                #     y_max = max(y_max, contour[k][1])
-                #     y_min = min(y_min, contour[k][1])
-                
-                # xp = cord[0]
-                # yp = cord[1]
-        
-                # Exclude points that are definetly outside the contour by max/min coordinates       # Currently disabled since both methods are of similiar performance
-                #if xp >= x_min and xp <= x_max and yp >= y_min and yp <= y_max:
+                # Currently disabled since both methods are of similiar performance
+                # if contour_boxing( contour, cord[0], cord[1] ): 
                 
                 inside = ray_tracing_method( cord[0], cord[1], contour) 
                 # If inside attribute extrema to contour and vice versa
@@ -597,14 +602,9 @@ def find_all_points_inside_contours( list_contours, x, y, value_array ):
         for j, contour in enumerate( list_contours ):
             
             if value_array[i] == 0:
-
-                x_max = np.amax( contour.contour[:][0] )
-                y_max = np.amax( contour.contour[:][1] )
-                x_min = np.amin( contour.contour[:][0] )
-                y_min = np.amin( contour.contour[:][1] )
-
-                # Exclude points that are definetly outside the contour by max/min coordinates 
-                if x[i] >= x_min and x[i] <= x_max and y[i] >= y_min and y[i] <= y_max:
+                
+                if contour_boxing( contour.contour,  x[i], y[i] ): 
+                
                     # Verify that point really is inside contour
                     inside = ray_tracing_method( x[i], y[i], contour.contour) 
                     if inside:
@@ -1143,16 +1143,15 @@ print( 'Number of cyclones found ' + str(len( list_pcontours )) + ' with ' + str
 # Calculate cyclone index
 shape = np.shape( cyclone_index )
 if not two_dim:
-    cvar = np.zeros( (shape[2], shape[3], ), dtype=cyclone_index.dtype )
+    dim_cvar = (shape[2], shape[3], )
 else:
-    cvar = np.zeros( (shape[1], shape[2], ), dtype=cyclone_index.dtype )
+    dim_cvar = (shape[1], shape[2], )
+cvar = np.zeros(  dim_cvar, dtype=cyclone_index.dtype )
 
 # Find collinear points in the contours
 find_all_collinear_pairs( list_pcontours, x, y )
 
 cvar = find_all_points_inside_contours_slicing( list_pcontours, cvar)
-
-# find_all_points_inside_contours(  list_pcontours, x, y, cvar )
 
 print( "Index max: ", str(cvar.max()), " min: ", str(cvar.min()) )
 
@@ -1167,7 +1166,7 @@ else:
 outgrp.close()
 
 
-if plot_all:
+if plot:
     plot_contour(pp,x,y,cvar,"Cyclone index", lev=[0.5,1.5], list_contours=list_pcontours,points=list_extrema, fill=True)
 
 
