@@ -8,7 +8,8 @@ import matplotlib
 matplotlib.use('Agg')
 from skimage import measure
 import argparse
-
+import copy
+import scipy.ndimage
 
 parser = argparse.ArgumentParser()
 
@@ -33,11 +34,13 @@ parser.add_argument('-zn','--zname', help='height variable name')
 parser.add_argument('-tn','--tname', help='time variable name')
 parser.add_argument('-tempn','--tempname', help='temperature variable name')
 
-
 parser.add_argument('-minlat','--minlat', help='1th lat for subdomain', type=float)
 parser.add_argument('-maxlat','--maxlat', help='2th lat for subdomain', type=float)
 parser.add_argument('-minlon','--minlon', help='1th lon for subdomain', type=float)
 parser.add_argument('-maxlon','--maxlon', help='2th lon for subdomain', type=float)
+
+parser.add_argument('-c','--cyclic', help='slp data cyclic in x-direction', action="store_true")
+parser.add_argument('-o','--outfile', help='output file')
 
 cl_args = parser.parse_args() # Command line argument parser
 
@@ -99,17 +102,28 @@ else:
 if cl_args.tempname:
     tname =  cl_args.tempname
 else:
-    tname = 'T'           
+    tname = 'T'   
+# output filename
+if cl_args.outfile:
+    outfilename = cl_args.outfile
+else:
+    outfilename = '~/test_cid.nc'        
 
+if cl_args.cyclic:
+    cyclic = True
+    print( "SLP data cyclic in x-direction" )
+else:
+    cyclic = False
+    
 dp = 2.                             # Pressure interval in hPa
-min_p = 940.                        # Minimum pressure contour in hPa
-max_p = 1035.                       # Maximum pressure contour in hPa
+min_p = 900.                        # Minimum pressure contour in hPa
+max_p = 1100.                       # Maximum pressure contour in hPa
 min_clength = 200.                  # Minimal contour length in km
 max_clength = 10000.                 # Maximal contour length in km
 cluster_radius = 2000.              # Radius for clustering extrema in km
 min_carea = 100. * 1000.            # Minimum contour area in qkm
-min_p_filter = 940.                 # Min filter for extrema in hPa
-max_p_filter = 1050.                # Max filter for extrema in hPa
+min_p_filter = 900.                 # Min filter for extrema in hPa
+max_p_filter = 1200.                # Max filter for extrema in hPa
 topo_filter  = 1500.                # Topopgrahy filter in m
 
 
@@ -555,6 +569,16 @@ def find_contours( arr, level, x, y, lat, lon, x_sinu, y_sinu ):
 
     return list_contours
 
+# Alternative implementation finding points inside contours based on scipy.ndimage
+def find_all_points_inside_ndimage( list_contours, list_extrema, value_array, pvar):
+
+    for i, extrema in enumerate( list_extrema ):
+        test = copy.copy(pvar)
+        test[test>extrema.largest_enclosing_contour_val] = 0
+        label, num_obj = scipy.ndimage.label(test)
+        obj_w_extremum = label[extrema.cord]
+        value_array[label==obj_w_extremum] = value_array[label==obj_w_extremum]+1
+    return value_array
 
 # Check if extrema is inside closed contour
 def find_points_inside_contour( list_contours, list_points ):
@@ -755,6 +779,8 @@ def cluster_extrema( list_extrema, cluster_radius ):
 
                 largest_contour = contours[max_index[0]]
                 extrema.largest_enclosing_contour = largest_contour
+                # additional property needed for cyclone point identification with scipy.ndimage
+                extrema.largest_enclosing_contour_val = max_value
                 largest_contour.cyclone_extrema.append( extrema )
  
 #--------------------------------------------------------
@@ -931,7 +957,7 @@ def filter_extrema_no_contour( list_extrema  ):
         
 
 # Input file
-rootgrp = Dataset(filename, "a", format="NETCDF4")
+rootgrp = Dataset(filename, "r", format="NETCDF4")
 topogrp = Dataset(topofilename, "r", format="NETCDF4")
 
 lati = rootgrp.variables[latname]
@@ -948,13 +974,12 @@ time = rootgrp.variables[timename]
 time = time[t0]
 
 # Output file
-# outgrp = Dataset(outfilename, "w", format="NETCDF4")
-# outgrp.setncatts( rootgrp.__dict__ )
-# for name, dimension in rootgrp.dimensions.items():
-#     outgrp.createDimension( name, (len(dimension) if not dimension.isunlimited() else None ))
+outgrp = Dataset(outfilename, "w", format="NETCDF4")
+outgrp.setncatts( rootgrp.__dict__ )
+for name, dimension in rootgrp.dimensions.items():
+    outgrp.createDimension( name, (len(dimension) if not dimension.isunlimited() else None ))
 
-outgrp = rootgrp
-    
+#outgrp = rootgrp
 
 # Subdomain 
 if subdomain:
@@ -967,6 +992,9 @@ else:
     iend = rootgrp.dimensions[latname].size #- 1
     j0 = 0
     jend = rootgrp.dimensions[lonname].size #- 1
+
+if cyclic:
+    jend = jend*2
 
 # Model level
 # Remember for ICON level 0 is TOA, last is surface
@@ -983,16 +1011,22 @@ nlon = jend - j0
 
 # Output variable
 # Read cyclone index variable if in file, otherwise create it
-if 'CYCL' in  outgrp.variables:
-    cyclone_index = outgrp['CYCL']
+if 'label' in  outgrp.variables:
+    cyclone_index = outgrp['label']
 else:
     if not two_dim:
-        cyclone_index = outgrp.createVariable( 'CYCL', float, (timename, heightname, latname, lonname,) )
+        cyclone_index = outgrp.createVariable( 'label', float, (timename, heightname, latname, lonname,) )
     else:
-        cyclone_index = outgrp.createVariable( 'CYCL', float, (timename, latname, lonname,) )
+        cyclone_index = outgrp.createVariable( 'label', float, (timename, latname, lonname,) )
 cyclone_index.long_name = "cyclone index"
-cyclone_index.standard_name = "cycl"
+cyclone_index.standard_name = "label"
 cyclone_index.units = ""
+
+lon_out = outgrp.createVariable( 'lon', float, ("longitude",) )
+lat_out = outgrp.createVariable( 'lat', float, ("latitude",) )
+
+lon_out[:] = loni[:]
+lat_out[:] = lati[:]
 
 if not two_dim:
     for k in range(nz):
@@ -1014,6 +1048,18 @@ else:
     var = var / 100.
     var.units = 'hPa'
 
+# does not yet work with topography filter!
+if cyclic:
+    loni_ext = np.zeros(2*loni.shape[0])
+    vari_ext = np.zeros((vari.shape[1],vari.shape[2]*2))
+    loni_ext[0:np.int(loni.shape[0]/2)] = loni[np.int(loni.shape[0]/2):]-360
+    loni_ext[np.int(loni.shape[0]/2):np.int(3*loni.shape[0]/2)] = loni[:]
+    loni_ext[np.int(3*loni.shape[0]/2):] = loni[:np.int(loni.shape[0]/2)]+360
+    vari_ext[:,0:np.int(loni.shape[0]/2)] = np.squeeze(vari[:,:,np.int(loni.shape[0]/2):])
+    vari_ext[:,np.int(loni.shape[0]/2):np.int(3*loni.shape[0]/2)] = np.squeeze(vari[:,:,:])
+    vari_ext[:,np.int(3*loni.shape[0]/2):] = np.squeeze(vari[:,:,:np.int(loni.shape[0]/2)])
+    var = CopyArrayDict(vari_ext/100., vari.__dict__)
+
 if topo_check:
     top = CopyArrayDict( topi[i0:iend,j0:jend],   topi.__dict__ )
 
@@ -1023,7 +1069,13 @@ if p_redu:
     temp = tempi[t0,k0,i0:iend,j0:jend]
     var = baro_pres( top, var, temp )
 
-lat, lon = np.meshgrid(  lati[i0:iend], loni[j0:jend],  indexing='ij' )
+if cyclic:
+    lon = CopyArrayDict(loni_ext, loni.__dict__)
+    lat, lon = np.meshgrid(  lati[i0:iend], loni[j0:jend],  indexing='ij' )
+else:
+    lat, lon = np.meshgrid(  lati[i0:iend], lon[j0:jend],  indexing='ij' )
+
+
 lat = CopyArrayDict( lat                  ,   lati.__dict__ ) 
 lon = CopyArrayDict( lon                  ,   loni.__dict__ ) 
 
@@ -1153,13 +1205,21 @@ find_all_collinear_pairs( list_pcontours, x, y )
 
 cvar = find_all_points_inside_contours_slicing( list_pcontours, cvar)
 
+#find_all_points_inside_ndimage( list_pcontours, list_extrema, cvar, var )
+
 print( "Index max: ", str(cvar.max()), " min: ", str(cvar.min()) )
 
 if not two_dim:
     for k in range(nz):
-        cyclone_index[t0,k,:,:] = cvar
+        if cyclic:
+            cyclone_index[t0,k,:,:] = cvar[:,np.int(loni.shape[0]/2):np.int(3*loni.shape[0]/2)]
+        else:
+            cyclone_index[t0,k,:,:] = cvar
 else:
-    cyclone_index[t0,:,:] = cvar
+    if cyclic:
+        cyclone_index[t0,k,:] = cvar[:,np.int(loni.shape[0]/2):np.int(3*loni.shape[0]/2)]
+    else:
+        cyclone_index[t0,:,:] = cvar
 
     
 # Close writing 
