@@ -72,7 +72,7 @@ else:
 if cl_args.pname:
     pname = cl_args.pname
 else:    
-    pname = 'PS'
+    pname = 'pres_msl'
 # Name of topography field in file
 if cl_args.toponame:
     toponame = cl_args.toponame
@@ -102,12 +102,12 @@ else:
 if cl_args.tempname:
     tname =  cl_args.tempname
 else:
-    tname = 'T'   
+    tname = 'temp'   
 # output filename
 if cl_args.outfile:
     outfilename = cl_args.outfile
 else:
-    outfilename = '~/test_cid.nc'        
+    outfilename = filename #'~/test_cid.nc'        
 
 if cl_args.cyclic:
     cyclic = True
@@ -125,7 +125,7 @@ min_carea = 100. * 1000.            # Minimum contour area in qkm
 min_p_filter = 900.                 # Min filter for extrema in hPa
 max_p_filter = 1200.                # Max filter for extrema in hPa
 topo_filter  = 1500.                # Topopgrahy filter in m
-
+varname = "label" #"CYCL"
 
 import time as cpu_time
 start_time = cpu_time.time()
@@ -973,13 +973,7 @@ else:
 time = rootgrp.variables[timename]
 time = time[t0]
 
-# Output file
-outgrp = Dataset(outfilename, "w", format="NETCDF4")
-outgrp.setncatts( rootgrp.__dict__ )
-for name, dimension in rootgrp.dimensions.items():
-    outgrp.createDimension( name, (len(dimension) if not dimension.isunlimited() else None ))
 
-#outgrp = rootgrp
 
 # Subdomain 
 if subdomain:
@@ -1009,24 +1003,35 @@ nlat = iend - i0
 nlon = jend - j0
 
 
+rootgrp.close()
+# topogrp.close()
+
+# Output file
+outgrp = Dataset(outfilename, "a", format="NETCDF4",clobber=False)
+# outgrp.setncatts( rootgrp.__dict__ )
+# for name, dimension in rootgrp.dimensions.items():
+#     outgrp.createDimension( name, (len(dimension) if not dimension.isunlimited() else None ))
+
+#outgrp = rootgrp
+
 # Output variable
 # Read cyclone index variable if in file, otherwise create it
 if 'label' in  outgrp.variables:
-    cyclone_index = outgrp['label']
+    cyclone_index = outgrp[varname]
 else:
     if not two_dim:
-        cyclone_index = outgrp.createVariable( 'label', float, (timename, heightname, latname, lonname,) )
+        cyclone_index = outgrp.createVariable( varname, float, (timename, heightname, latname, lonname,) )
     else:
-        cyclone_index = outgrp.createVariable( 'label', float, (timename, latname, lonname,) )
+        cyclone_index = outgrp.createVariable( varname, float, (timename, latname, lonname,) )
 cyclone_index.long_name = "cyclone index"
-cyclone_index.standard_name = "label"
+cyclone_index.standard_name = varname
 cyclone_index.units = ""
 
-lon_out = outgrp.createVariable( 'lon', float, ("longitude",) )
-lat_out = outgrp.createVariable( 'lat', float, ("latitude",) )
+#lon_out = outgrp.createVariable( 'lon', float, ("longitude",) )
+#lat_out = outgrp.createVariable( 'lat', float, ("latitude",) )
 
-lon_out[:] = loni[:]
-lat_out[:] = lati[:]
+# lon_out[:] = loni[:]
+# lat_out[:] = lati[:]
 
 if not two_dim:
     for k in range(nz):
@@ -1052,12 +1057,12 @@ else:
 if cyclic:
     loni_ext = np.zeros(2*loni.shape[0])
     vari_ext = np.zeros((vari.shape[1],vari.shape[2]*2))
-    loni_ext[0:np.int(loni.shape[0]/2)] = loni[np.int(loni.shape[0]/2):]-360
-    loni_ext[np.int(loni.shape[0]/2):np.int(3*loni.shape[0]/2)] = loni[:]
-    loni_ext[np.int(3*loni.shape[0]/2):] = loni[:np.int(loni.shape[0]/2)]+360
-    vari_ext[:,0:np.int(loni.shape[0]/2)] = np.squeeze(vari[:,:,np.int(loni.shape[0]/2):])
-    vari_ext[:,np.int(loni.shape[0]/2):np.int(3*loni.shape[0]/2)] = np.squeeze(vari[:,:,:])
-    vari_ext[:,np.int(3*loni.shape[0]/2):] = np.squeeze(vari[:,:,:np.int(loni.shape[0]/2)])
+    loni_ext[0:int(loni.shape[0]/2)] = loni[int(loni.shape[0]/2):]-360
+    loni_ext[int(loni.shape[0]/2):int(3*loni.shape[0]/2)] = loni[:]
+    loni_ext[int(3*loni.shape[0]/2):] = loni[:int(loni.shape[0]/2)]+360
+    vari_ext[:,0:int(loni.shape[0]/2)] = np.squeeze(vari[:,:,int(loni.shape[0]/2):])
+    vari_ext[:,int(loni.shape[0]/2):int(3*loni.shape[0]/2)] = np.squeeze(vari[:,:,:])
+    vari_ext[:,int(3*loni.shape[0]/2):] = np.squeeze(vari[:,:,:int(loni.shape[0]/2)])
     var = CopyArrayDict(vari_ext/100., vari.__dict__)
 
 if topo_check:
@@ -1073,7 +1078,7 @@ if cyclic:
     lon = CopyArrayDict(loni_ext, loni.__dict__)
     lat, lon = np.meshgrid(  lati[i0:iend], loni[j0:jend],  indexing='ij' )
 else:
-    lat, lon = np.meshgrid(  lati[i0:iend], lon[j0:jend],  indexing='ij' )
+    lat, lon = np.meshgrid(  lati[i0:iend], loni[j0:jend],  indexing='ij' )
 
 
 lat = CopyArrayDict( lat                  ,   lati.__dict__ ) 
