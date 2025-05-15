@@ -14,7 +14,6 @@ import scipy.ndimage
 parser = argparse.ArgumentParser()
 
 # Required command line arguments
-#parser.add_argument('diri', help='data input directory')
 parser.add_argument('filename', help='data input filename')
 
 # Optional command line arguments
@@ -44,7 +43,6 @@ parser.add_argument('-o','--outfile', help='output file')
 
 cl_args = parser.parse_args() # Command line argument parser
 
-#diri=cl_args.diri             # Input directory
 filename=cl_args.filename     # Input file name
 print( 'Inputfile: ' + filename )
 
@@ -107,7 +105,7 @@ else:
 if cl_args.outfile:
     outfilename = cl_args.outfile
 else:
-    outfilename = filename #'~/test_cid.nc'        
+    outfilename = filename      
 
 if cl_args.cyclic:
     cyclic = True
@@ -119,13 +117,14 @@ dp = 2.                             # Pressure interval in hPa
 min_p = 900.                        # Minimum pressure contour in hPa
 max_p = 1100.                       # Maximum pressure contour in hPa
 min_clength = 200.                  # Minimal contour length in km
-max_clength = 10000.                 # Maximal contour length in km
+max_clength = 15000.                # Maximal contour length in km
 cluster_radius = 2000.              # Radius for clustering extrema in km
 min_carea = 100. * 1000.            # Minimum contour area in qkm
 min_p_filter = 900.                 # Min filter for extrema in hPa
 max_p_filter = 1200.                # Max filter for extrema in hPa
 topo_filter  = 1500.                # Topopgrahy filter in m
-varname = "label" #"CYCL"
+varname = "label"                   # variable name of cyclone index
+keep = False                        # Keep index if already in file
 
 import time as cpu_time
 start_time = cpu_time.time()
@@ -267,7 +266,6 @@ def plot_contour( pp, x, y, z, title, lev=None, list_contours=[], points=None, \
     else:
         cm = ax.contour( y, x, z, colors='black', levels=lev, linewidths=.5 )
         ax.clabel(cm, fontsize=8, fmt=format)
-    #q = ax.quiver(y, x, u, v, units='width')
 
     ax.set_xlabel( x_meta[1] + " " + x_meta[2] )
     ax.set_ylabel( y_meta[1] + " " + y_meta[2] )
@@ -1003,9 +1001,9 @@ nlat = iend - i0
 nlon = jend - j0
 
 
-rootgrp.close()
+# rootgrp.close()
 # topogrp.close()
-
+print( outfilename )
 # Output file
 outgrp = Dataset(outfilename, "a", format="NETCDF4",clobber=False)
 # outgrp.setncatts( rootgrp.__dict__ )
@@ -1018,6 +1016,12 @@ outgrp = Dataset(outfilename, "a", format="NETCDF4",clobber=False)
 # Read cyclone index variable if in file, otherwise create it
 if 'label' in  outgrp.variables:
     cyclone_index = outgrp[varname]
+    if (np.amax(cyclone_index) <= 1.1e5) and (np.amin(cyclone_index) >= -0.1) and keep:
+        print( "Cyclone index already in file. Don't calculate" )
+        outgrp.close()
+        print("Finished after:")
+        print("--- %s seconds ---" % (cpu_time.time() - start_time))
+        sys.exit()
 else:
     if not two_dim:
         cyclone_index = outgrp.createVariable( varname, float, (timename, heightname, latname, lonname,) )
@@ -1103,7 +1107,7 @@ lonr.units = 'radians'
 dlat = abs(lati[0] - lati[1])
 dlon = abs(loni[0] - loni[1])
 dd = (dlat + dlon) / 2.
-order_ext = int(5. / dd)
+order_ext = int(2.5 / dd)
 
 
 # Grid point arrays used for all contour analysis
@@ -1193,9 +1197,7 @@ list_extrema = filter_extrema_w_contour( list_pcontours  )
 if plot:
     plot_contour(pp,x,y,var,"Cyclone clustering at " + str(time) , lev=plevel,list_contours=list_pcontours,points=list_extrema)
 
-
 print( 'Number of cyclones found ' + str(len( list_pcontours )) + ' with ' + str(len( list_extrema )) + ' extremas' )
-
 
 # Calculate cyclone index
 shape = np.shape( cyclone_index )
@@ -1206,11 +1208,7 @@ else:
 cvar = np.zeros(  dim_cvar, dtype=cyclone_index.dtype )
 
 # Find collinear points in the contours
-find_all_collinear_pairs( list_pcontours, x, y )
-
-cvar = find_all_points_inside_contours_slicing( list_pcontours, cvar)
-
-#find_all_points_inside_ndimage( list_pcontours, list_extrema, cvar, var )
+find_all_points_inside_ndimage( list_pcontours, list_extrema, cvar, var )
 
 print( "Index max: ", str(cvar.max()), " min: ", str(cvar.min()) )
 
